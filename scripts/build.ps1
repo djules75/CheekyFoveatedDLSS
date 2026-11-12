@@ -81,6 +81,8 @@ foreach ($proxy in @('reshade','streamline')) {
 }
 
 $testExecutable = Join-Path $projectRoot "bin\$Configuration\CheekyTests.exe"
+& $testExecutable --openxr-aer-calibration
+if ($LASTEXITCODE -ne 0) { throw "OpenXR alternating-eye release calibration regression failed." }
 foreach ($api in @('dx11', 'dx12')) {
     foreach ($attachment in @('early', 'late')) {
         & (Join-Path $projectRoot "bin\$Configuration\CheekyStandaloneHostTests.exe") "startup-$api-$attachment"

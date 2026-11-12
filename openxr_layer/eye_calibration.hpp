@@ -56,6 +56,7 @@ struct Frame {
     std::uint64_t generation{};
     std::uint32_t graphics_api{};
     bool active{};
+    bool deferred{};
 
     void begin(const CheekyEyeCalibrationBridgeV1* api, std::uint64_t gen, std::uint32_t graphics) noexcept {
         generation = gen;
@@ -63,6 +64,7 @@ struct Frame {
         tickets = {};
         released = {};
         captured = {};
+        deferred = false;
         active = api && (graphics == 11 || graphics == 12) && api->begin(gen, graphics);
     }
     void before_release(const CheekyEyeCalibrationBridgeV1* api, std::uint64_t swapchain, std::uint32_t index,
@@ -87,6 +89,25 @@ struct Frame {
             if (captured[slot].swapchain == swapchain && indices[slot] == index)
                 released[slot] = success;
     }
+    // Legacy AER releases only one of two distinct eye swapchains per frame.
+    // Retain its immutable pre-release capture for ONE more EndFrame, without
+    // restarting the core marker epoch. The final end() still validates both
+    // images against the actual submitted geometry and last released indices.
+    bool defer_incomplete_pair(const std::array<Region, 2>& views,
+                               const std::array<std::uint32_t, 2>& last_released, bool success) noexcept {
+        if (!active || deferred || graphics_api != 11 || !success || views != history ||
+            !views[0].valid() || !views[1].valid() || views[0].swapchain == views[1].swapchain)
+            return false;
+        for (unsigned slot = 0; slot < 2; ++slot) {
+            const auto other = 1U - slot;
+            if (tickets[slot] && released[slot] && !tickets[other] && !released[other] &&
+                captured[slot] == views[slot] && indices[slot] == last_released[slot]) {
+                deferred = true;
+                return true;
+            }
+        }
+        return false;
+    }
     void end(const CheekyEyeCalibrationBridgeV1* api, const std::array<Region, 2>& views,
              const std::array<std::uint32_t, 2>& last_released, bool success) noexcept {
         bool valid = success && views[0].valid() && views[1].valid() && views[0] != views[1];
@@ -104,6 +125,7 @@ struct Frame {
         // Never retain geometry from a failed or ambiguous submission.
         history = success ? views : std::array<Region, 2>{};
         active = false;
+        deferred = false;
     }
     void destroy(const CheekyEyeCalibrationBridgeV1* api) noexcept {
         if (api && generation)

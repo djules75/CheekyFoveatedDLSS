@@ -241,6 +241,7 @@ add_test(NAME CheekyRetainedCalibrationTests COMMAND CheekyTests --retained-cali
 add_test(NAME CheekyLibOVRPolicy COMMAND CheekyTests --libovr-policy)
 add_test(NAME CheekyLibOVRTransfer COMMAND CheekyTests --libovr-transfer)
 add_test(NAME CheekyLibOVRAERCalibration COMMAND CheekyTests --libovr-aer-calibration)
+add_test(NAME CheekyOpenXRAERCalibration COMMAND CheekyTests --openxr-aer-calibration)
 add_test(NAME CheekyCalibrationSearch COMMAND CheekyTests --calibration-search)
 add_test(NAME CheekyCalibrationModesTests COMMAND CheekyTests --calibration-modes)
 add_test(NAME CheekyCalibrationIncompleteTests COMMAND CheekyTests --calibration-incomplete)

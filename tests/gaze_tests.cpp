@@ -2910,6 +2910,8 @@ int main(int argc, char** argv) {
     }
     extern int run_retained_calibration_tests();
     extern int run_libovr_alternating_calibration_tests();
+    extern int run_openxr_alternating_release_tests();
+    if (argc == 2 && std::strcmp(argv[1], "--openxr-aer-calibration") == 0) return run_openxr_alternating_release_tests();
     if (argc == 2 && std::strcmp(argv[1], "--libovr-aer-calibration") == 0) return run_libovr_alternating_calibration_tests();
     extern int run_libovr_transfer_tests();
     if (argc == 2 && std::strcmp(argv[1], "--libovr-transfer") == 0) return run_libovr_transfer_tests();
@@ -3028,6 +3030,7 @@ int main(int argc, char** argv) {
     failures += run_eye_calibration_tests();
     failures += run_retained_calibration_tests();
     failures += run_libovr_alternating_calibration_tests();
+    failures += run_openxr_alternating_release_tests();
     failures += run_crop_calibration12_tests();
     failures += run_stereo_support_tests();
     failures += run_stereo_support12_tests();

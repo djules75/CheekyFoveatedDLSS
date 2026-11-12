@@ -92,6 +92,7 @@ struct XRLayer {
     XrInstance instance{};
     XrSession session{};
     XrSwapchain chain{};
+    XrSwapchain second_chain{};
     XrSwapchain dummy_chain{};
     unsigned projection_mode{}; // 0: normal, 1/2: dummy first/last, 3: ambiguous, 4: dummy only
     unsigned image_width{}, image_height{};
@@ -152,7 +153,7 @@ struct XRLayer {
         return reinterpret_cast<T>(out);
     }
     XRLayer(void* texture, unsigned api, void* binding, unsigned width = 128, unsigned slices = 2,
-             unsigned height = 128) : image_width(width), image_height(height) {
+             unsigned height = 128, void* right_texture = nullptr) : image_width(width), image_height(height) {
         image = texture;
         graphics = api;
         next_chain = 76;
@@ -209,27 +210,37 @@ struct XRLayer {
                         api == 11 ? static_cast<void*>(&image11) : static_cast<void*>(&image12))) ==
                     XR_SUCCESS,
                 "Layer image enumeration failed");
+        if (right_texture) {
+            require(fn<PFN_xrCreateSwapchain>("xrCreateSwapchain")(session, &chain_info, &second_chain) == XR_SUCCESS,
+                    "Second eye swapchain failed");
+            image = right_texture;
+            require(fn<PFN_xrEnumerateSwapchainImages>("xrEnumerateSwapchainImages")(
+                second_chain, 1, &count, reinterpret_cast<XrSwapchainImageBaseHeader*>(&image11)) == XR_SUCCESS,
+                "Second eye image enumeration failed");
+            image = texture;
+        }
         chain_info.width = chain_info.height = 4;
         chain_info.arraySize = 1;
         require(fn<PFN_xrCreateSwapchain>("xrCreateSwapchain")(session, &chain_info, &dummy_chain) == XR_SUCCESS,
                 "Dummy swapchain failed");
     }
-    void begin() {
+    void begin(unsigned eye = 0) {
+        const auto selected_chain = eye && second_chain ? second_chain : chain;
         XrFrameBeginInfo info{XR_TYPE_FRAME_BEGIN_INFO};
         require(fn<PFN_xrBeginFrame>("xrBeginFrame")(session, &info) == XR_SUCCESS, "BeginFrame failed");
         XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
         std::uint32_t index{};
-        require(fn<PFN_xrAcquireSwapchainImage>("xrAcquireSwapchainImage")(chain, &acquire, &index) ==
+        require(fn<PFN_xrAcquireSwapchainImage>("xrAcquireSwapchainImage")(selected_chain, &acquire, &index) ==
                     XR_SUCCESS,
                 "Acquire failed");
         XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
         wait.timeout = XR_INFINITE_DURATION;
-        require(fn<PFN_xrWaitSwapchainImage>("xrWaitSwapchainImage")(chain, &wait) == wait_result,
+        require(fn<PFN_xrWaitSwapchainImage>("xrWaitSwapchainImage")(selected_chain, &wait) == wait_result,
                 "Wait result was not forwarded");
     }
-    void release() {
+    void release(unsigned eye = 0) {
         XrSwapchainImageReleaseInfo info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-        require(fn<PFN_xrReleaseSwapchainImage>("xrReleaseSwapchainImage")(chain, &info) == release_result,
+        require(fn<PFN_xrReleaseSwapchainImage>("xrReleaseSwapchainImage")(eye && second_chain ? second_chain : chain, &info) == release_result,
                 "Release result was not forwarded");
     }
     void end(bool swap, bool array = true) {
@@ -237,10 +248,10 @@ struct XRLayer {
         for (unsigned eye = 0; eye < 2; ++eye) {
             auto& v = views[eye];
             v.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-            v.subImage.swapchain = chain;
-            v.subImage.imageArrayIndex = array ? eye : 0;
-            const auto eye_width = static_cast<int>(array ? image_width : image_width / 2);
-            v.subImage.imageRect = {{array ? 0 : static_cast<int>(eye) * eye_width, 0},
+            v.subImage.swapchain = eye && second_chain ? second_chain : chain;
+            v.subImage.imageArrayIndex = array && !second_chain ? eye : 0;
+            const auto eye_width = static_cast<int>(array || second_chain ? image_width : image_width / 2);
+            v.subImage.imageRect = {{array || second_chain ? 0 : static_cast<int>(eye) * eye_width, 0},
                                    {eye_width, static_cast<int>(image_height)}};
         }
         if (swap)
@@ -276,12 +287,13 @@ struct XRLayer {
                         (array ? image_width : image_width / 2)),
                     "Gaze must select the real projection or clear rejected geometry");
             require(bool(snapshot.status_flags & CHEEKY_GAZE_STATUS_AMBIGUOUS_RESOURCE) ==
-                        (projection_mode == 3 || (array && projection_mode < 3)),
+                        (projection_mode == 3 || (array && !second_chain && projection_mode < 3)),
                     "Ambiguous projection status must not persist into a valid frame");
         }
     }
     ~XRLayer() {
         if (session) {
+            if (second_chain) fn<PFN_xrDestroySwapchain>("xrDestroySwapchain")(second_chain);
             fn<PFN_xrDestroySwapchain>("xrDestroySwapchain")(chain);
             fn<PFN_xrDestroySwapchain>("xrDestroySwapchain")(dummy_chain);
             fn<PFN_xrDestroySession>("xrDestroySession")(session);
@@ -336,6 +348,51 @@ void layer_policy() {
         if (variant == 5)
             require(labels[0] == 1 && labels[1] == 0, "EndFrame must relabel swapped subimages");
     }
+}
+void alternating_release_policy() {
+    using namespace cheeky::openxr_calibration;
+    CheekyEyeCalibrationBridgeV1 api;
+    api.begin = [](std::uint64_t, std::uint32_t) noexcept { return true; };
+    api.capture = [](std::uint64_t, void*, void*, std::uint32_t, std::uint32_t eye,
+                     std::uint32_t, float, float, float, float) noexcept -> std::uint64_t { return eye + 1; };
+    api.result = [](std::uint64_t ticket, int result, std::uint32_t) noexcept {
+        if (ticket && !result) ++accepted;
+    };
+    api.destroy = [](std::uint64_t) noexcept {};
+    const std::array<Region, 2> regions{{{10,0,0,0,128,128},{20,0,0,0,128,128}}};
+    const std::array<std::uint32_t, 2> indices{1,2};
+    for (unsigned variant = 0; variant < 10; ++variant) {
+        Frame frame; frame.history = regions; frame.begin(&api, 42, 11);
+        frame.before_release(&api, 10, 1, reinterpret_cast<void*>(1), nullptr, 128, 128);
+        frame.after_release(10, 1, variant != 1);
+        auto submitted = regions;
+        auto released_indices = indices;
+        if (variant == 2) submitted[1].width = 64;
+        if (variant == 3) released_indices[0] = 3;
+        if (variant == 4) frame.graphics_api = 12;
+        if (variant == 5) std::swap(submitted[0], submitted[1]);
+        const bool deferred = frame.defer_incomplete_pair(submitted, released_indices, variant != 6);
+        require(deferred == (variant == 0 || variant >= 7),
+                "Only a successful, stable, submitted DX11 eye may await its missing partner");
+        if (!deferred) continue;
+        require(!frame.defer_incomplete_pair(regions, indices, true),
+                "An incomplete OpenXR pair must not wait longer than one extra frame");
+        if (variant != 7) {
+            frame.before_release(&api, 20, 2, reinterpret_cast<void*>(1), nullptr, 128, 128);
+            frame.after_release(20, 2, variant != 8);
+        }
+        if (variant == 9) released_indices[0] = 3;
+        accepted = 0;
+        frame.end(&api, regions, released_indices, true);
+        require(accepted == (variant == 0 ? 2U : 0U),
+                "Missing, failed or no-longer-submitted eyes must reject the entire carried pair");
+        require(!frame.active && !frame.deferred, "Closing a carried pair clears its state");
+        frame.destroy(&api);
+        require(!frame.defer_incomplete_pair(regions, indices, true),
+                "Session/swapchain destruction must discard a carried pair");
+    }
+    layer_policy(); // Ordinary stereo and array-slice validation are unchanged.
+    std::cout << "PASS OpenXR AER policy: bounded carry, failed release, changed geometry/index, stereo and destroy\n";
 }
 void projection_policy() {
     std::array<XrCompositionLayerProjectionView, 2> real_views{}, dummy_views{};
@@ -928,6 +985,63 @@ void continuous_marker_lifetime12() {
     gpu.execute(); gpu.wait(gpu.queue.Get()); calibration12_retired(gpu.list.Get());
     cleanup();
     std::cout << "PASS continuous DX12 markers: no readbacks, queue/recording lifetime, bounded pool, disable\n";
+}
+// Actual layer, DX12 sources and separate DX11 eye swapchains: EndFrame
+// submits both eyes, but only one eye is acquired/released on each frame.
+void openxr_alternating_releases() {
+    roles();
+    GPU12 gpu;
+    constexpr unsigned size = 128;
+    constexpr auto format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    std::array<ComPtr<ID3D12Resource>, 2> sources{
+        gpu.texture(size, 1, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, format),
+        gpu.texture(size, 1, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, format)};
+    D3D12_RESOURCE_DESC buffer{};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; buffer.Width = size * size * 8;
+    buffer.Height = buffer.SampleDesc.Count = 1;
+    buffer.DepthOrArraySize = buffer.MipLevels = 1; buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_READBACK;
+    ComPtr<ID3D12Resource> readback;
+    check(gpu.device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)));
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+        D3D11_SDK_VERSION, &device, nullptr, &context));
+    D3D11_TEXTURE2D_DESC desc{size, size, 1, 1, format, {1, 0}, D3D11_USAGE_DEFAULT, 0, 0, 0};
+    std::array<ComPtr<ID3D11Texture2D>, 2> images;
+    for (auto& image : images) check(device->CreateTexture2D(&desc, nullptr, &image));
+    XrGraphicsBindingD3D11KHR binding{XR_TYPE_GRAPHICS_BINDING_D3D11_KHR}; binding.device = device.Get();
+    XRLayer layer(images[0].Get(), 11, &binding, size, 1, size, images[1].Get());
+    unsigned frames{};
+    const auto render = [&] {
+        const unsigned eye = frames++ & 1U;
+        layer.begin(eye);
+        gpu.begin();
+        eye_calibration_stamp12(gpu.list.Get(), sources[eye].Get(), 9101 + eye, 0, 0, size, size);
+        gpu.barrier(sources[eye].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        D3D12_TEXTURE_COPY_LOCATION source{}, target{};
+        source.pResource = sources[eye].Get(); source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        target.pResource = readback.Get(); target.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        target.PlacedFootprint.Footprint = {format, size, size, 1, size * 8};
+        gpu.list->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+        gpu.barrier(sources[eye].Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        gpu.execute(); gpu.wait(gpu.queue.Get()); calibration12_retired(gpu.list.Get());
+        // Test-only host transport. Production does not wait/copy across devices.
+        void* pixels{}; check(readback->Map(0, nullptr, &pixels));
+        context->UpdateSubresource(images[eye].Get(), 0, nullptr, pixels, size * 8, 0);
+        readback->Unmap(0, nullptr);
+        layer.release(eye); layer.end(false);
+        context->Flush(); Sleep(2); eye_calibration_tick();
+    };
+    for (unsigned i = 0; i < 100; ++i) render();
+    require(stereo_eye_assignment(9101).calibrated && stereo_eye_assignment(9101).eye_index == 0 &&
+            stereo_eye_assignment(9102).calibrated && stereo_eye_assignment(9102).eye_index == 1,
+            "OpenXR legacy AER must pair alternating releases across frames (DX12 -> DX11)");
+    eye_calibration_enable(false); render(); render();
+    for (unsigned i = 0; i < 20; ++i) { Sleep(2); eye_calibration_tick(); }
+    cleanup();
+    std::cout << "PASS OpenXR legacy AER: actual layer, DX12 sources, alternating DX11 eye releases\n";
 }
 void mixed_api12to11(bool wrapped, bool flipped, bool cropped = false, bool delayed = false, bool mono = false) {
     roles();
@@ -1942,6 +2056,13 @@ void libovr_alternating_commits() {
     std::cout << "PASS LibOVR legacy AER: alternating eye commits paired across frames\n";
 }
 } // namespace
+int run_openxr_alternating_release_tests() {
+    try { alternating_release_policy(); openxr_alternating_releases(); return 0; }
+    catch (const std::exception& e) {
+        std::cerr << "OpenXR alternating releases: " << e.what() << '\n' << eye_calibration_json() << '\n';
+        cleanup(); return 1;
+    }
+}
 int run_libovr_alternating_calibration_tests() {
     try { libovr_alternating_commits(); return 0; }
     catch (const std::exception& e) {

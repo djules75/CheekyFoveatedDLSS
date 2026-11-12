@@ -1,3 +1,14 @@
+# OpenXR legacy alternating-eye releases
+
+`CheekyTests --openxr-aer-calibration` exercises the actual OpenXR layer with
+D3D12 source images transported into two D3D11 eye swapchains. Each frame
+releases only one eye while submitting both views, as in RealVR legacy AER.
+The adapter retains a successful single-eye capture for at most one additional
+EndFrame, then checks both submitted image indices, release results and layouts.
+The regression also rejects missing/failed partners, geometry/index changes and
+destroyed sessions, and covers ordinary stereo/array submissions. This does not
+replace a Cyberpunk/headset check with the matching OpenXR layer installed.
+
 # D3D11 quad role assignment retries
 
 `CheekyOpenXRBindingTests.exe --quad-roles` checks four-view marker proof on

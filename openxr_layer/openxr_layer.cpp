@@ -263,6 +263,7 @@ struct SessionState {
     XrTime submitted_projection_time{};
     bool submitted_projection_valid{}, using_submitted_projection{};
     cheeky::openxr_calibration::Frame calibration;
+    unsigned calibration_pair_deferrals{};
     unsigned graphics_api{};
     void* graphics_device{};
     void* graphics_queue{};
@@ -4576,12 +4577,17 @@ extern "C" XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrEndFrame(
                     else released[eye] = chain->second.released_index;
                 }
             }
-            owner->second.calibration.end(cheeky::openxr_calibration::bridge(), valid ? regions : decltype(regions){}, released, valid);
-            // Validate the submitted pair before closing its core record and
-            // arming the next sample. End-to-end intervals cover both early and
-            // late BeginFrame hosts; the first interval is an unstamped warm-up.
-            owner->second.calibration.begin(cheeky::openxr_calibration::bridge(),
-                owner->second.generation, owner->second.graphics_api);
+            if (owner->second.calibration.defer_incomplete_pair(regions, released, valid)) {
+                if (++owner->second.calibration_pair_deferrals == 1)
+                    log_startup("CALIB OpenXR alternating eye releases: retaining one eye for the next EndFrame\n");
+            } else {
+                owner->second.calibration.end(cheeky::openxr_calibration::bridge(), valid ? regions : decltype(regions){}, released, valid);
+                // Validate the submitted pair before closing its core record and
+                // arming the next sample. End-to-end intervals cover both early and
+                // late BeginFrame hosts; the first interval is an unstamped warm-up.
+                owner->second.calibration.begin(cheeky::openxr_calibration::bridge(),
+                    owner->second.generation, owner->second.graphics_api);
+            }
         }
     }
     if (XR_FAILED(result)) return result;
