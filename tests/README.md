@@ -1,3 +1,13 @@
+# Quad bridge and calibration lock order
+
+`CheekyOpenXRBindingTests --quad-bridge-lock` reproduces the CP77/OFXR hang's
+lock order: a render thread holds the core calibration lock and queries quad
+status while EndFrame holds the layer state lock and needs calibration. The
+query must finish without the state lock. The old implementation fails within
+a bounded timeout rather than hanging the suite. `--quad-d3d11` also checks
+active quad queries under the state lock and owner withdrawal on EndSession
+and DestroySession while an existing reader retains compositor ownership.
+
 # OpenXR legacy alternating-eye releases
 
 `CheekyTests --openxr-aer-calibration` exercises the actual OpenXR layer with

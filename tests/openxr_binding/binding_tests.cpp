@@ -1224,6 +1224,7 @@ void diagnostic_lifetime_test() {
 #endif
 #include "quad_capture_validation.hpp"
 #include "quad_version_validation.hpp"
+#include "quad_bridge_lock_validation.hpp"
 #include "quad_capture_d3d11_validation.hpp"
 #include "quad_role_mapping_validation.hpp"
 #include "fg_shader11_validation.hpp"
@@ -1241,6 +1242,7 @@ void diagnostic_lifetime_test() {
 int main(int argc,char** argv) {
     std::cout.setf(std::ios::unitbuf);
     try {
+        if(argc>1&&std::string(argv[1])=="--quad-bridge-lock") {quad_bridge_lock_validation();return 0;}
         if(argc>1&&std::string(argv[1])=="--openxr-stereo-alignment") {stereo_alignment_validation();return 0;}
         if(argc>1&&std::string(argv[1])=="--nr-native") {submission_diagnostics_validation();color_scale_bias_validation();native_nr_validation();return 0;}
         if(argc>1&&std::string(argv[1])=="--menu-live-cursor") {

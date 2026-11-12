@@ -35,6 +35,7 @@ add_test(NAME OpenXRMenuNonblocking COMMAND CheekyOpenXRBindingTests --menu-nonb
 add_test(NAME OpenXRMenuLiveCursor COMMAND CheekyOpenXRBindingTests --menu-live-cursor)
 add_test(NAME OpenXRQuadD3D11 COMMAND CheekyOpenXRBindingTests --quad-d3d11)
 add_test(NAME OpenXRQuadRoles COMMAND CheekyOpenXRBindingTests --quad-roles)
+add_test(NAME OpenXRQuadBridgeLock COMMAND CheekyOpenXRBindingTests --quad-bridge-lock)
 add_test(NAME OpenXRQuadD3D12 COMMAND CheekyOpenXRBindingTests --quad-capture)
 add_test(NAME OpenXRQuadVersion COMMAND CheekyOpenXRBindingTests --quad-version)
 add_test(NAME OpenXRFGCopyStates COMMAND CheekyOpenXRBindingTests --fg-gpu-validation)

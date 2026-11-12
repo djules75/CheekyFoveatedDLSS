@@ -339,13 +339,33 @@ XrResult quad_capture_end(XrSession session,const XrFrameEndInfo* info,const Dis
     return result;
 }
 
-// Optional, versioned role bridge. Retain compositor ownership, then drop the
-// session lock before GPU work or mapper locks. No consumer callbacks occur.
+// Optional, versioned role bridge. Core callers can own the calibration mutex
+// while EndFrame owns state_mutex and calls back into that same core. Queries
+// must therefore NEVER acquire state_mutex, even in ordinary stereo sessions.
+// Publish immutable owner lists at session lifecycle transitions. Readers keep
+// their own shared ownership through mapper/GPU work and session destruction.
+struct QuadRoleOwner {
+    std::shared_ptr<cheeky::quad_capture::Compositor> compositor;
+    uint64_t generation{};
+    void* device{};
+};
+using QuadRoleOwners=std::vector<QuadRoleOwner>;
+std::atomic<std::shared_ptr<const QuadRoleOwners>> published_quad_role_owners;
+
+// state_mutex is held by the lifecycle writer, never by the readers below.
+void publish_quad_role_owners_locked() {
+    auto owners=std::make_shared<QuadRoleOwners>();
+    for(const auto& [handle,owner]:sessions)
+        if(owner.running&&owner.quad_capture&&owner.graphics_api==11)
+            owners->push_back({owner.quad_capture,owner.generation,owner.graphics_device});
+    published_quad_role_owners.store(std::move(owners),std::memory_order_release);
+}
 std::shared_ptr<cheeky::quad_capture::Compositor> quad_role_owner(uint64_t* generation=nullptr,ID3D11Device* device=nullptr) {
-    std::lock_guard lock(state_mutex);std::shared_ptr<cheeky::quad_capture::Compositor> result;
-    for(const auto& [handle,owner]:sessions)if(owner.running&&owner.quad_capture&&owner.graphics_api==11&&
-        (!device||owner.graphics_device==device)){
-        if(result)return {};result=owner.quad_capture;if(generation)*generation=owner.generation;}
+    const auto owners=published_quad_role_owners.load(std::memory_order_acquire);
+    if(!owners)return {};
+    std::shared_ptr<cheeky::quad_capture::Compositor> result;
+    for(const auto& owner:*owners)if(!device||owner.device==device){
+        if(result)return {};result=owner.compositor;if(generation)*generation=owner.generation;}
     return result;
 }
 extern "C" __declspec(dllexport) uint32_t __cdecl CheekyQuad_GetViewsV1(CheekyQuadViewsV1* output) noexcept {

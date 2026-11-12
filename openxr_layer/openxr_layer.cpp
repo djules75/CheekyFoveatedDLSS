@@ -2582,6 +2582,7 @@ extern "C" XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrDestroyInstance(
                 ++session_it;
             }
         }
+        publish_quad_role_owners_locked();
         for (auto swapchain_it = swapchains.begin();
              swapchain_it != swapchains.end();) {
             if (sessions.find(swapchain_it->second.session) == sessions.end()) {
@@ -2760,6 +2761,7 @@ extern "C" XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrDestroySession(
         retired_fg=std::move(session_it->second.fg);
         std::erase_if(frame_spaces,[&](const auto& entry){return entry.second->session==session;});
         sessions.erase(session_it);
+        publish_quad_role_owners_locked();
         for (auto iterator = swapchains.begin(); iterator != swapchains.end();) {
             if (iterator->second.session == session) {
                 iterator = swapchains.erase(iterator);
@@ -2901,6 +2903,7 @@ extern "C" XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrBeginSession(
             iterator->second.view_configuration =
                 info->primaryViewConfigurationType;
             iterator->second.quad_capture = std::move(quad);
+            publish_quad_role_owners_locked();
             iterator->second.quad_capture_locates = iterator->second.quad_capture_frames = 0;
             iterator->second.quad_capture_correct_focus_fov = bool(iterator->second.quad_capture)&&dcs_quad_capture_host();
             iterator->second.quad_capture_fovs.clear();
@@ -2936,6 +2939,7 @@ extern "C" XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrEndSession(
         session_state.native_waits_pending=0;
         session_state.native_frame_begun=false;
         session_state.running = false;
+        publish_quad_role_owners_locked();
         session_state.quad_capture_fovs.clear();
         session_state.action_active = false;
         session_state.gaze_valid = false;

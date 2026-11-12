@@ -79,6 +79,8 @@ void quad_capture_d3d11_validation() {
         XrSessionBeginInfo begin{XR_TYPE_SESSION_BEGIN_INFO};begin.primaryViewConfigurationType=configurations[0];
         check(cheeky_xrBeginSession(handle,&begin)==XR_SUCCESS&&quad_runtime_configuration==XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,"D3D11 quad was rejected");
         auto compositor=sessions.at(handle).quad_capture;check(compositor&&compositor->d3d11,"No native D3D11 quad compositor");
+        quad_bridge_query_while_locked(true);
+        check(quad_role_owner().get()==compositor.get(),"Active quad compositor was not published");
         sessions.at(handle).quad_capture_correct_focus_fov=true;
         XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};locate.viewConfigurationType=begin.primaryViewConfigurationType;locate.displayTime=123;
         XrViewState state{XR_TYPE_VIEW_STATE};std::array<XrView,4> views;for(auto& v:views)v={XR_TYPE_VIEW};
@@ -126,6 +128,14 @@ void quad_capture_d3d11_validation() {
         if(errors)for(UINT64 i=0;i<errors->GetNumStoredMessages();++i){SIZE_T size{};errors->GetMessage(i,nullptr,&size);std::vector<char> storage(size);
             auto* message=reinterpret_cast<D3D11_MESSAGE*>(storage.data());errors->GetMessage(i,message,&size);
             if(message->Severity<=D3D11_MESSAGE_SEVERITY_ERROR){std::cerr<<message->pDescription<<'\n';check(false,"Quad11 D3D11 debug-layer error");}}
+        d.end_session=[](XrSession){return XR_SUCCESS;};
+        d.destroy_session=[](XrSession){return XR_SUCCESS;};
+        if(format==DXGI_FORMAT_R8G8B8A8_UNORM)
+            check(cheeky_xrEndSession(handle)==XR_SUCCESS,"Quad bridge EndSession fixture");
+        else check(cheeky_xrDestroySession(handle)==XR_SUCCESS,"Quad bridge DestroySession fixture");
+        quad_bridge_query_while_locked(false);
+        check(!quad_role_owner()&&compositor->d3d11,
+            "Stopped/destroyed owners must be withdrawn while in-flight readers retain their compositor");
         sessions.clear();compositor.reset();swapchains.clear();quad11_chains.clear();quad11_device=nullptr;
     }
     std::cout<<"PASS D3D11 quad selection/session/submission, pre-begin sampleable images, array/crop/SRGB pixels, DCS focus FOV, context state and wait recovery (WARP)\n";

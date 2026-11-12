@@ -95,6 +95,8 @@ foreach ($gazeMode in @('--manual-gaze', '--openxr-independent-on', '--openxr-in
 }
 & (Join-Path $projectRoot "bin\$Configuration\CheekyOpenXRBindingTests.exe")
 if ($LASTEXITCODE -ne 0) { throw "OpenXR binding and pointer regressions failed." }
+& (Join-Path $projectRoot "bin\$Configuration\CheekyOpenXRBindingTests.exe") --quad-bridge-lock
+if ($LASTEXITCODE -ne 0) { throw "OpenXR quad bridge/calibration lock order regression failed." }
 & (Join-Path $projectRoot "bin\$Configuration\CheekyOpenXRBindingTests.exe") --openxr-stereo-alignment
 if ($LASTEXITCODE -ne 0) { throw "Direct OpenXR stereo alignment regressions failed." }
 & (Join-Path $projectRoot "bin\$Configuration\CheekyOpenXRBindingTests.exe") --nr-native
